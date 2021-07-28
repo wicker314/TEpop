@@ -1,0 +1,191 @@
+#!/usr/bin/perl
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+if (@ARGV < 1) {
+	print "1.= .aln file produced with clustalw\n";
+	exit;
+	}
+
+
+# get info for output file name
+$file = $ARGV[0];
+print "produce consensus of $file\n";
+
+$file =~ s/\.aln//;
+$file =~ s/_flat//;
+
+$out = "$file\_cons";
+open(OUT,">$out");
+
+
+
+# extract all sequence names into @name
+$flag = 0;
+open(IN,"<$ARGV[0]");
+while (<IN>){
+
+	# count empty lines
+	($space) = /^[^\S]$/;
+	if ($space) {
+		$flag += 1;
+		}
+
+	($name) = /^(\S+)\s+\S+$/;
+
+	if ($name) {
+		push(@name,$name);
+		}
+
+	# finish after first iteration of names
+	if ($flag >2) {
+		last;
+		}
+	}
+
+close(IN);
+
+
+
+# suck all sequences into array +++++++++++++++++++++++++++++++++++++++++++++++++
+@seq = ();
+
+foreach $name (@name) {
+
+	open(IN,"<$ARGV[0]");
+	$temp_seq = '';
+	while (<IN>){
+		($seq) = /^$name\s+(\S+)/;
+		if ($seq) {
+			$temp_seq .= $seq
+			}
+		}
+
+	push(@seq,$temp_seq);
+	close(IN);
+	}
+
+
+
+
+# extract sequence data into 2D array ++++++++++++++++++++++++++++++++++++++++++++++++++
+for($i=0;$i<@name;$i++){
+
+	print "$name[$i]\n";
+
+	# split each sequence into temp array
+	@pos = split('',$seq[$i]);
+
+	$len = @pos;
+
+	# fill all bases into 2D array
+	for($j=0;$j<@pos;$j++){
+		$matrix[$i][$j] = $pos[$j];
+		}
+
+	}
+
+
+
+
+# make consensus ++++++++++++++++++++++++++++++++++++++++++++++++++
+
+print "alignment length:\t$len\n\n";
+
+$cons = '';
+$line = @name;
+
+# loop through ailnment positions
+for($i=0;$i<=$len;$i++){
+
+	# initiate array for base/aa counts
+        @comp = ();
+
+	# loop through all bases at one position
+        for($j=0;$j<@name;$j++){
+                $base = $matrix[$j][$i];
+                &composition;
+                }
+        &analyse;
+
+	# add consensus base/aa to cons string
+	$cons .= $best_aa;
+
+
+        }
+
+# eliminate positions where gap is consensus
+$cons =~ s/-//g;
+
+# make fasta format and writ output
+($fasta) = &mk_fasta($cons);
+
+print "\nwrote consensus to $out\n\n";
+
+print OUT ">$out\n$fasta\n";
+
+print "thank you for using WICKERsoft supersoftware\n\n";
+
+
+
+# composition +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# add current base/aa to count of base/aa
+sub composition {
+
+@aa = qw(- A C D E F G H I K L M N P Q R S T V W Y);
+my($i);
+
+for($i=0;$i<@aa;$i++) {
+	if ($base eq $aa[$i]) {
+		$comp[$i]++;
+		}
+	}
+
+} # end composition ---------------------------------------------------------
+
+
+
+# analyse position to determine most abundant base/aa ++++++++++++++++++++++++++++++++++++
+sub analyse {
+
+$max = 0;
+$best_aa = '';
+$var = 0;
+$var_aa = '';
+my($k);
+
+for ($k=0;$k<@comp;$k++) {
+
+        $out_matrix[$i][$k] = $comp[$k];
+
+        if ($comp[$k] > 0) {
+                $var++;
+                $var_aa .= "$aa[$k] ";
+                }
+
+        if ($comp[$k] >= $max) {
+                $max = $comp[$k];
+                $best_aa = $aa[$k];
+                } 
+        }
+
+$out_matrix[$i][21] = $best_aa;
+$out_matrix[$i][22] = $max;
+$out_matrix[$i][23] = $var;
+$out_matrix[$i][24] = $var_aa;
+
+$matrix[$line+1][$i] = $best_aa;
+$matrix[$line+2][$i] = $max;
+$matrix[$line+3][$i] = $var;
+
+$matrix[$line+4][$i] = $color;
+
+}
+
+
+
+
+
+
+
