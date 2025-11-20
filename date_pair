@@ -1,0 +1,273 @@
+#!/usr/bin/perl
+
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+if (@ARGV < 1) {
+	print "1.= query for pair files\n";
+	print "2.= optional name for log file (e.g. RLC_HvulMorex_BARE1)\n";
+	exit;
+	}
+
+# mkae generic LTR length	
+$ltr_len = 2000;
+
+# variables for met vs. age bin analysis
+$age_bin = 0.2;
+@met = ();
+
+# make log file name	
+if ($ARGV[1]) {
+	$index = $ARGV[1];
+	} else {
+	$index = $ARGV[0];	
+	}
+$log2 = "age_distribution_$index";
+open(LOG2,">$log2");
+
+print LOG2 "TE\taln\tsim\tTI\tTV\tage\tstd\twarning\trel_met\tgenome\tfam\tchr\tpos\n";
+
+
+$log = "LTR_SNP_pos_GC_summary";
+open(LOG,">$log");
+
+# make empty LTR SNP and GC array
+@SNP = ();
+@GC = ();
+for($i=0;$i<$ltr_len;$i++) {
+        $SNP[$i] =0;
+	$GC[$i] =0;
+        }
+
+
+foreach $file (<*$ARGV[0]*.pair>){
+	#print "process $file\n";
+
+	# get species/genome if available
+	($sp,$g) = ($file =~ /^[^_]+_(....)\S+chr\d+([A-Z]+)-/);
+	$spe = "$sp\_$g";
+	if (!$spe) {
+		$spe = "NA";
+		}
+
+	($code,$fa,$chr,$pos) = ($file =~ /^([^_]+)_[^_]+_([^_]+)_(chr\S+)-(\d+)/);
+
+	$fam = "$code\_$fa";
+
+	&find_id;
+	$count_file++;
+	}
+
+
+
+# run methylation analysis in age bins 
+print "\nmethylation analysis in age bins\n\n";
+print "Insertion age vs. C->T/G->A substitions:\n\n";
+
+print "be\ten\tcopies\trel_met\n";
+for($i=0;$i<4;$i+=$age_bin) {
+
+	$be = $i;
+	$en = $i+$age_bin;
+
+	$count_age = 0;
+	$sum_met = 0;
+
+	for($j=0;$j<$count_file;$j++) {
+
+		if (($met[$j][0] >=$be) && ($met[$j][0] < $en)) {
+			$count_age++;
+			$sum_met += $met[$j][1];
+			}
+
+		}
+
+	$avg = 'NA';
+	if ($count_age > 0) {	
+		$avg = $sum_met/$count_age;
+		$avg = sprintf("%.02f",$avg);
+		}
+	print "$be\t$en\t$count_age\t$avg\n";
+
+
+
+	}
+
+
+print "wrote $log2\n";
+
+
+
+
+
+# evaluate alignment ++++++++++++++++++++++++++++++++++
+sub find_id {
+
+# parse bestfit output
+($seq1,$seq2,$be1,$en1,$be2,$en2) = &sequences_from_pair($file);
+($name1,$name2) = ($file =~/^(.+)x(.+)\./);
+
+@seq1 = split('',$seq1);
+@seq2 = split('',$seq2);
+
+$len = @seq1;
+$len_aln = 0;
+$ti = 0;
+$tv = 0;
+$id = 0;
+$met = 0;
+$met2 = 0;
+
+#$len = 800;
+
+for ($i =0;$i<$len;$i++){
+
+#		print "$seq1[$i] <=> $seq2[$i]";
+	
+		if (($seq1[$i] ne '-') && ($seq2[$i] ne '-')&&($seq1[$i] ne 'N') && ($seq2[$i] ne 'N')){
+			$len_aln++;
+			if ($seq1[$i] eq $seq2[$i]){
+				$id++;
+				} else {
+				# determine substitition kind
+				&subst_matrix;
+				$SNP[$i]++;
+				}
+			}
+
+		# check for methylation candidates 
+                if ((($seq1[$i] eq 'C') && ($seq2[$i] eq 'T')) && (($seq1[$i+1] eq 'G') || ($seq1[$i+2] eq 'G'))){
+                        $met++;
+#			print "\tmet $met";
+                        }
+                if ((($seq2[$i] eq 'C') && ($seq1[$i] eq 'T')) && (($seq2[$i+1] eq 'G') || ($seq2[$i+2] eq 'G'))){
+                        $met++;
+#			print "\tmet $met";
+                        }
+
+#		print "\n";
+
+		# record possible methylation mutations, simple
+		if ((($seq2[$i] eq 'C') && ($seq1[$i] eq 'T')) || (($seq2[$i] eq 'T') && ($seq1[$i] eq 'C'))) {
+			$met2++;
+			}
+
+		if ((($seq2[$i] eq 'G') && ($seq1[$i] eq 'A')) || (($seq2[$i] eq 'A') && ($seq1[$i] eq 'G'))) {
+                        $met2++;
+                        }
+
+
+
+		# record GC content
+		if (($seq1[$i] ne '-') && (($seq2[$i] eq 'C') || ($seq2[$i] eq 'G'))) {
+			$GC[$i]++;
+			}
+		}
+
+
+if ($len_aln > 0){
+	$ide = (int($id/$len_aln*10000))/100;
+	} else {
+	$ide = "0";
+	}	
+
+
+$file =~ s/_LTR.pair//;
+
+$warn = "NA";
+if (($len_aln > 0) && ($len_aln <= 500)) {
+	$warn = "SHORT";
+	}
+
+if ($len_aln > 0){
+
+# calculate standard divergece +++++++++++++++++++++++++++
+(@date) = &seq2date($len_aln,$ti,$tv);
+$date = (int($date[0]/1000))/1000;
+$std = (int($date[1]/1000))/1000;
+
+# calc fraction of met-mutations
+$tot_mut = $ti+$tv;
+$rel_met = 'NA';
+if ($tot_mut > 0) {
+	$rel_met = $met2/$tot_mut*100;
+	$rel_met = sprintf("%.02f",$rel_met);
+	}	
+
+# collect for methylation analysis
+$met[$count_file][0] = $date;
+$met[$count_file][1] = $rel_met;
+
+
+print "$file\t$len_aln\t$ide%\t$ti\t$tv\t$date\t$std\t$warn\t$met2\t$rel_met\t$spe\t$fam\t$chr\t$pos\n";
+
+print LOG2 "$file\t$len_aln\t$ide%\t$ti\t$tv\t$date\t$std\t$warn\t$rel_met\t$spe\t$fam\t$chr\t$pos\n";
+
+} 
+
+
+sub no_use {
+
+# compensate for methylation +++++++++++++++++++++++++++++
+$ti -=$met;
+$base_count -= $met;
+if ($ti < 0) {
+	$ti =0;
+	}
+
+(@date) = &seq2date($len_aln,$ti,$tv);
+$date = (int($date[0]/1000))/1000;
+$std = (int($date[1]/1000))/1000;
+
+print "metylation compensated\t\t\t$len_aln\t$ide%\t$ti\t$tv\t$date\t$std\n";
+}
+
+}	 
+
+
+
+
+# display SNP density an GC in windows
+$win = 100;
+$step = 10;
+
+
+for($i=0;$i<($ltr_len-$win);$i+=$step) {
+
+	$sum = 0;
+	for($j=$i;$j<($i+$win);$j++) {
+		$sum += $SNP[$j];
+		}
+	
+
+	$sum2 = 0;
+        for($j=$i;$j<($i+$win);$j++) {
+                $sum2 += $GC[$j];
+                }
+
+
+        print LOG "$i\t$sum\t$sum2\n";
+#	print "$i\t$sum\n";
+        }
+
+#print "wrote $log\n";
+
+
+
+
+
+
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+sub subst_matrix {
+
+if (($seq1[$i] eq 'A') && ($seq2[$i] eq 'G')) { $ti++; }
+elsif (($seq1[$i] eq 'G') && ($seq2[$i] eq 'A')) { $ti++; }
+elsif (($seq1[$i] eq 'C') && ($seq2[$i] eq 'T')) { $ti++; }
+elsif (($seq1[$i] eq 'T') && ($seq2[$i] eq 'C')) { $ti++; }
+else { $tv++; }
+
+} # -------------------------------------------------------------------
+
+
+

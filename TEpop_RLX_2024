@@ -1,0 +1,377 @@
+#!/usr/bin/perl
+
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+
+if (@ARGV < 6) {
+	print "1.= end of file name query for LTRs (i.e. _LTR)\n";
+	print "2.= minimal alignment size (close to size of smallest LTR used)\n";
+	print "3.= size range of element (e.g. 6000-8000)\n";
+	print "4.= full TE family name (e.g. RLC_HvulMorexv3_BARE1)\n";
+	print "5.= name query for databases (e.g. Bgt_96224_v316_chr)\n";
+	print "6.= allowed number of bases missing at LTR ends (e.g. 5)\n";
+	exit;
+	}
+
+# copy blast matrix to wd
+`cp /home/wicker/data/WICKERsoft/BLOSUM62 .`;
+
+# directories for chromosomes and blast databases
+$db_dir  = "/home/wicker/data/databases/blast_databases/";
+$chr_dir = "/home/wicker/data/dir_chromosomes/";
+
+
+$infile =$ARGV[0];
+$min_len = $ARGV[1];
+$range = $ARGV[2];
+$fam = $ARGV[3];
+$chr_query = $ARGV[4];
+$end_cut = $ARGV[5];
+
+# hard-code similarity cutoff
+$min_sim = 75;
+
+# extract size range of TE
+($min_TE,$max_TE) = ($ARGV[2] =~ /^(\d+)-(\d+)/);
+($be_db,$en_db) = ($ARGV[4] =~ /^(\d+)-(\d+)/);
+
+
+# #####################################################################
+# check if blast datbases and chromosomes exist is standard directories 
+# ... mk chromosome list
+print "chromosomes found in dir_chromsomes:\n";
+
+@chr = ();
+$chr_files = "$chr_dir$chr_query";
+foreach $ch (<$chr_files*>) {
+	
+	($chr) = ($ch =~ /dir_chromosomes\/(\S+)/);
+	# elminate possible junk extensions
+	$chr =~ s/\.\S+$//;
+		unless ($chr ~~ @chr) {
+		push(@chr,$chr);
+		}
+	}
+
+# check if blast databases exist, if no make them 
+@db = ();
+foreach $chr (@chr) {
+
+	$check =0;
+	print "$chr\n";
+	
+	$db_file = "$db_dir$chr\.ndb";
+	$db_name = "$db_dir$chr";
+	if (-e $db_file) {
+		print "$db_file\tdb exists\n";
+		} else {
+		$db_chr = "$chr_dir$chr";	
+		print "$db_file\tDB MISSING ==> write new\n";
+		print "formatdb -i $db_chr -p F\n";
+		`formatdb -i $db_chr -p F`;
+		`mv $db_chr.* /home/wicker/data/databases/blast_databases/`;
+		}	
+	push(@db,$db_name);
+        }
+
+
+
+
+######################################################################
+# isolate LTR retros
+
+print "\n################################\n";
+print "\nstart isolating LTR retros\n";
+print "\n################################\n\n";
+
+# loop over databases +++++++++++++++++++++++++++++++++++
+$ID_old = "NULL";
+foreach $db (@db) {
+
+	print "DATABASE = $db +++++++++++++++++\n";
+
+	# loop over LTR files ++++++++++++++++++++++++
+	foreach $file (<*$infile>) {
+
+		($dna) = &pure_sequence($file);
+		$len = length($dna);
+
+		print "blast $file ($len bp) against $db blastn\n";
+
+		# run blastn
+		$blast = "$file\.blastn";
+		
+		`blastall -p blastn -d $db -i $file -F F -o $blast`;
+
+		&process_LTR;
+
+		`rm $blast`;
+
+		}
+
+	}
+
+
+
+#####################################################################
+# main subroutine with blast parser and extraction TEs 
+sub process_LTR {
+
+# parse blast	
+@test = ();
+@data = ();
+$hit_yes =0;
+$ID='';
+
+@hit = ();
+$count =0;
+
+(@test) = &parse_blast($blast);
+
+# only look at top hit +++++++++++++++++++++++++++++++++++++++++++++++
+($ID,$rem) = ($test[0] =~ /ID=([^;]+);([^;]+)/);
+(@data) = ($test[0] =~ /^(data=.+)$/gm);
+
+# loop over all alignments ++++++++++++++++++++++++++
+foreach $data (@data) {
+
+($Eval,$sim,$be1,$en1,$be2,$en2,$seq1,$seq2) = ($data =~
+/data=[^;]+;([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);([^;]+)/);
+
+($pot) = ($Eval =~ /e-(\d+)/);
+
+$diff = abs($be1-$en1);
+
+# if criteria are met, collect position info in @hit
+if (($diff >= $min_len)&&($sim >=$min_sim)) {
+
+        $ori = "F";
+        $beg = $be2;
+        $end = $en2;
+        if ($be2 > $en2) {
+                $ori = "R";
+                $beg = $en2;
+                $end = $be2;
+                }
+
+        $hit[$count][0] = $ori;
+        $hit[$count][1] = $beg;
+        $hit[$count][2] = $end;
+        $hit[$count][3] = $be1;
+        $hit[$count][4] = $en1;
+        $count++;
+
+        #print "$count\t$ID\t$ori\t1\t$beg;$end\n";
+                }
+
+        } # end loop over all alignments
+
+
+
+# sort blast hits by position	
+@sort = sort { $a->[1] <=> $b->[1] } @hit;
+
+print "$count hits\n";
+
+
+# get chromosome sequence if it is a new one 
+if ($ID ne $ID_old) {
+	$chr_name = "/home/wicker/data/dir_chromosomes/$ID";
+	print "extract chromosome $ID\n$chr_name\n";
+	($chr) = &pure_sequence($chr_name);
+	$len_chr = length($chr);
+	print "length = $len_chr\n\n";
+	if ($len_chr <1) {
+		print "ERROR $chr_name not found data/dir_chromsomes/\n";
+		exit;
+		}
+	}	
+	
+
+# collect forward and reverse hits
+$count_complete = 0;
+
+$ori = "F";
+&isolate_fl;
+
+$ori = "R";
+&isolate_fl;
+
+# memorize chr name
+$ID_old = $ID;
+
+} # end process LTR ---------------------------------------
+
+
+
+
+
+# isolate lull length elements and LTRs ++++++++++++++++++++++++++++
+sub isolate_fl {
+@full = ();
+$count_fl =0;
+
+
+# make collection of all (near-) full length LTRs of the F or R orientation 
+# allow only afe missing bp at the ends
+for($i=0;$i<$count;$i++) {
+
+        # check for full-length
+        if (($sort[$i][3] <$end_cut) && ($sort[$i][4] >($len-$end_cut)) && ($sort[$i][0] eq $ori)) {
+
+                $full[$count_fl][0] = $sort[$i][1];
+                $full[$count_fl][1] = $sort[$i][2];
+                $count_fl ++;
+                #print "$ins\_$ID-$count_fl\t$sort[$i][0]\t$sort[$i][1]-$sort[$i][2]\n";
+                }
+        }
+
+print "ORI = $ori\t$count_fl full-length LTRs\n";
+
+
+
+# check if LTRs are withing size range or solo-LTRs
+for($i=0;$i<($count_fl);$i++) {
+
+        # check for solo-LTR ++++++++++++++++++++
+        $solo_yes = 0;
+        $be = $full[$i][0];
+        $en = $full[$i][1];
+
+        # assemble element
+        $len_TE = abs($en-$be)+1;
+        $be--;
+        $sub = substr($chr,$be,$len_TE);
+
+        if ($ori eq 'R') {
+                ($rev) = &invert_sequence($sub);
+                $sub = $rev;
+                }
+
+        # get 5' TSD
+        $be_tsd= $be-5;
+        $tsd5 = substr($chr,$be_tsd,5);
+
+        # get 3' TSD
+        $be_tsd= $en;
+        $tsd3 = substr($chr,$be_tsd,5);
+
+        $rem = '';
+
+
+        if ($tsd3 eq $tsd5) {
+                $count_complete++;
+
+                $count_cp = int($be/1000);
+		#                $val = sprintf("%06d",$count_cp);
+		$val = sprintf("%07d",$count_cp);
+                ($chr_ID) = ($ID =~ /(chr[^\s^_]+)/);
+                $name = "$fam\_$ID-$count_cp\_soloLTR";
+                $name = "$fam\_$chr_ID-$val\_soloLTR";
+                #$name =~ s/_Scer_Lo7_v1_//;
+
+                ($fasta) = &mk_fasta($sub);
+                open(OUT,">$name");
+                print OUT ">$name $be-$en $ori TSD=$tsd1-$tsd2\n$fasta\n";
+                close(OUT);
+
+                $count_solo++;
+                $rem = "soloLTR";
+                $solo_yes = 1;
+                print OUT "$name\t$ori\t$full[$i][0]-$full[$i][1]\t$tsd1\t$tsd2\n";
+                }
+
+
+
+        # check for full-length +++++++++++++++++++++++
+        $delta = $full[$i+1][1]-$full[$i][0];
+        if (($delta < $max_TE) && ($delta > ($min_TE)) && ($solo_yes ==0) && ($i < ($count_fl-1))) {
+                $count_complete++;
+                $count_cp = int($be/1000);
+		#$val = sprintf("%06d",$count_cp);
+                $val = sprintf("%07d",$count_cp);
+
+                ($chr_ID) = ($ID =~ /(chr[^\s^_]+)/);
+                $name = "$fam\_$chr_ID-$val\_TSD";
+
+                # assemble element
+                $be = $full[$i][0];
+                $en = $full[$i+1][1];
+                $len_TE = abs($en-$be)+1;
+                $be--;
+                $sub = substr($chr,$be,$len_TE);
+                if ($ori eq 'R') {
+                        ($rev) = &invert_sequence($sub);
+                        $sub = $rev;
+                        }
+
+                # get 5' TSD
+                $be_tsd= $be-5;
+                $tsd1 = substr($chr,$be_tsd,5);
+                $tsd5 = $tsd1;
+
+                # get 3' TSD
+                $be_tsd= $en;
+                $tsd2 = substr($chr,$be_tsd,5);
+                $tsd3 = $tsd2;
+
+                ($fasta) = &mk_fasta($sub);
+                open(OUT,">$name");
+                print OUT ">$name $be-$en $ori TSD=$tsd1-$tsd2\n$fasta\n";
+                close(OUT);
+
+                $count_TSD++;
+
+                $rem = "TSD";
+                print LOG "$name\t$ori\t$full[$i][0]-$full[$i+1][1]\t$delta\t$tsd1\t$tsd2\n";
+                }
+
+        print "$i\t$ID\t$be-$en\t$ori\t$tsd5\t$tsd3\t$rem\n";
+
+        }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

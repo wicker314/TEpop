@@ -1,0 +1,149 @@
+#!/usr/bin/perl
+
+# ***** bestflash 02.12.19
+# compares all seuneces in wd with all others
+# using the smith-waterman aloritm
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+# print usage if not enough arguments +++++++++++++++++++ 
+if (@ARGV < 4) {
+
+        print "\n1.= sequence with which all others are compared\n";
+        print "2.= string common to all others\n";
+	print "3.= gap open penalty (e.g. 50)\n";
+	print "4.= gap extension penalty (e.g. 0.1)\n";
+        print "\nthank you for using WICKERsoft supersoftware\n\n"; 
+        exit;
+        }
+
+
+
+$query = $ARGV[0];
+$group2 = $ARGV[1];
+$open = $ARGV[2];
+$ext = $ARGV[3];
+
+foreach $file (<*$group2*>) {
+	
+	unless (($file =~ /pair$/) || ($file =~ /_flat/)) {
+
+		# check for lenth of each group2 sequnece
+		($seq) = &pure_sequence($file);
+		$len = length($seq);
+
+		if ($len > 10) {
+        		push(@group2, $file);
+			}
+		}
+
+        }
+
+@pairs = ();
+
+print "the following pairs will be produced\n";
+
+for ($i = 0; $i<@group2;$i++){
+
+	if ($query ne $group2[$i]) {
+
+		$pair = "$query $group2[$i]";
+		print "$pair\n";
+		push (@pairs, $pair);
+
+		}
+
+	}
+$count_pair = @pairs;
+print "total $count_pair pairs\n";
+
+
+$c = 0;
+
+foreach $pair (@pairs) {
+
+	($seq1, $seq2) = ($pair =~ /^(\S+)\s+(\S+)/);
+
+	$collect = "${seq1}\_pairs";
+	$c++;
+	print "aligning $c\tof $count_pair\t$seq1 x $seq2\n";	
+
+
+	$outfile = "$seq1\__x__$seq2.pair";
+	$outfile2 = "$seq1\__x__$seq2.pair_tmp";
+
+	`water $seq1 $seq2 -gapopen=$open -gapextend=$ext -outfile=$outfile`;
+
+# reformat output file +++++++++++++++++++++++++++++++++
+
+open (OUT,">$outfile2");
+open (IN2, "$outfile");
+
+$which = 0;
+$space = "                     ";
+
+while (<IN2>){
+
+	($nam1) = /# 1:\s+(\S+)/;
+	if ($nam1) {
+		$name1 = $nam1;
+		$name1 .= "                                             ";
+		$name1 = substr($name1,0,45);
+		}
+
+	($nam2) = /# 2:\s+(\S+)/;
+        if ($nam2) {
+                $name2 = $nam2;
+		$name2 .= "                                               ";
+                $name2 = substr($name2,0,45);
+                }
+
+	if (/#/) {
+		print OUT;
+		}
+
+        ($go) = /^$/;
+        if ($go) {
+		$which = 0;
+		print OUT;
+		}
+
+        ($name,$be,$seq,$en) = /^(\S+)\s+(\d+)\s+(\S+)\s+(\d+)/;
+
+        ($al) = /^$space([\s\|\.:\s]+)$/;
+        if ($al) {
+		chomp($al);
+		print OUT "                                                        $al\n";
+                }
+
+        if ($seq && $which ==1) {
+                $be += $beg1;
+                $en += $beg1;
+
+		$pos = "$be          ";
+		$be = substr($pos,0,9);
+		print OUT "$name1 $be $seq $en\n";
+                }
+
+        if ($seq && ($which ==3)) {
+                $be += $beg2;
+                $en += $beg2;
+                $which = 0;
+
+                $pos = "$be          ";
+                $be = substr($pos,0,9);
+                print OUT "$name2 $be $seq $en\n";
+
+                }
+
+        $which++;
+
+        }
+
+close(IN2);
+close(OUT);
+
+`mv $outfile2 $outfile`;
+
+	}

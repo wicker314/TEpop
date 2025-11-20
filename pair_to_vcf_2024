@@ -1,0 +1,247 @@
+#!/usr/bin/perl
+
+srand(time);
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+if (@ARGV < 3) {
+	print "1.= reference sequence (used for bestflash with all copies)\n";
+	print "2.= minimum allele frequency for major allele (e.g. 0.05)\n";
+	print "3.= length of seq to use (e.g. only LTR)\n";
+	print "4.= outfile name (optional, default = ref_seq.vcf\n";
+	exit;
+	}
+
+$ref = $ARGV[0];
+$cut = $ARGV[1];
+$len_cut = $ARGV[2];
+
+$log = "$ref\.vcf";
+if ($ARGV[3]) {
+	$log = "$ARGV[3]\.vcf";
+	}
+open(LOG,">$log");
+
+
+# extract reference sequence
+($dna) = &pure_sequence($ref);
+$len = length($dna);
+print "ref = $name\t$len bp\n";
+@ref = split('',$dna);
+
+if ($len_cut > $len) {
+	$len_cut = $len;
+	}
+
+if ($len ==0) {
+	print "\n******************************************************************\n";
+	print "\nWARNING FATAL ERROR CRASH BOOM BANG: reference sequence has size 0\n\n";
+	exit;
+	}
+
+        
+# make header of vcf
+@head = (
+"fileformat=VCFv4.1",
+"fileDate=20180314",
+"reference=$ref",
+"contig=<ID=$ref,length=$len>",
+);
+
+foreach $head (@head) {
+        print LOG "##$head\n";
+        }
+
+
+
+
+# initiate vcf array
+for($i=0;$i<@ref;$i++) {
+	$vcf[$i][0] = $ref[$i];
+	$vcf[$i][1] = $ref[$i];
+	}
+
+
+
+# loop over all pair files
+$count =2;
+PAIRS:foreach $file (<*$ARGV[0]*.pair>) {
+
+
+	($name1_1,$name1_2) = $file =~/^(\S+)__x__(\S+)\.pair/;
+
+	$name = "$name1_2";
+	$sample[$count] = $name;
+
+	# extract polymorphic sites
+	($seq1,$seq2,$be1,$en1,$be2,$en2) = &sequences_from_pair($file);
+
+	print "process $count\t$name\t$file\t$be1-$en1\t$be2-$en2\n";
+
+	@seq1 = split('',$seq1);
+	@seq2 = split('',$seq2);
+
+	$ref_pos = $be1-1;
+
+	$len_seq1 = @seq1;
+
+	# only use part of sequece to save time, (for lots of copies)
+	if ($ARGV[2] ne '') {
+		$len_seq1 = $len_cut; 
+		}
+
+	# loop thru sequence 
+	for($i=0;$i<$len_seq1;$i++) {
+		#print "$i\t$seq1[$i] <=> $seq2[$i]\n";
+		if (($seq1[$i] ne $seq2[$i]) && ($seq1[$i] ne '-')) {
+			$vcf[$ref_pos][1] .= $seq2[$i];
+			}
+
+		if ($seq1[$i] ne $ref[$ref_pos]) {
+			#print "WARNING\t$i\t$file\n";
+			}	
+
+		if ($seq1[$i] eq '-')  {
+#			print "$i\t$file\n";
+			}
+
+		# collect all bases of samples in 2D array 
+		$vcf[$ref_pos][$count] = $seq2[$i];
+
+		if ($seq1[$i] ne '-') {
+			$ref_pos++;
+			}
+		}
+
+
+	$count++;
+
+	if ($count > 2000) {
+#		last(PAIRS);
+		}
+	}
+
+print "samples: $count\n";
+
+
+
+
+# collect genotypes +++++++++++++++++++++++++++++++++++++++++
+for($i=0;$i<$len_seq1;$i++) {
+
+	$line = "$i\t$vcf[$i][0]\t$vcf[$i][1]";
+	print "test $i\t$vcf[$i][0]\t$vcf[$i][1]\n";
+	# test if there are major alleles
+	if ($vcf[$i][0] ne $vcf[$i][1]) {	
+
+		&test_allele;
+
+		# print position if there is a major allele
+		if ($maj > 0) {
+			$pos = $i+1;
+			$id = "S$i";
+			$line = "1\t$pos\t$id\t$vcf[$i][0]\t$majors\t100\tPASS\t.\tGT";
+		
+			for($j=2;$j<$count;$j++) {
+				$line .= "\t$vcf[$i][$j]";
+				}
+
+#			print "$line\n";
+			print "$pos\t$id\n";
+			#print LOG "$line\n";
+			$outfile .= "$line\n";
+			}
+		
+
+		}
+	}
+
+
+# write vcf file
+print LOG "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT";
+
+for($i=2;$i<@sample;$i++) {
+        $name = $sample[$i];
+        print LOG "\t$name";
+        }
+
+
+print LOG "\n$outfile";
+
+close(LOG);
+
+print "wrote $log\n";
+
+
+
+# ++++++++++++++++++++++++++++++++++++++++
+sub test_allele {
+
+# remove original ref allele (that was still there for technical reasons, see above
+$ref = $vcf[$i][0];
+$vcf[$i][1] =~ s/^$ref//;
+	
+# sort and count alternative alleles
+@var = split('',$vcf[$i][1]);
+@var = sort(@var);
+
+$count_var =1;
+@major = ();
+$maj = 0;
+$majors = '';
+
+#print "\nvar = @var\n";
+
+for($v=0;$v<@var;$v++) {
+	if ($var[$v] ne $var[$v+1]) {
+		if ($count_var > ($cut*$count)) {
+			unless ($var[$v] eq '-') {
+				$major[$maj][0] = $var[$v];
+				$major[$maj][1] = $count_var;
+				$majors .= "$var[$v],";
+				$maj++;
+				}
+			}
+		print "$var[$v]\t$count_var\t$cut*$count\n";
+		$count_var =0;
+		}
+	$count_var++;
+	}
+
+@major = sort{$b->[1] <=>$a->[1]}(@major);
+$majors =~ s/,$//;
+
+print "major\t$maj\n\n";
+
+
+# determine genotypes
+@gt = ();
+	#print "test $major[$m][0]\n";
+for($j=2;$j<$count;$j++) {
+
+	#$gt = "$sample[$j]-./.";
+	$gt = "./.";
+
+	if ($vcf[$i][$j] eq $vcf[$i][0]) {
+		$gt = "0/0";
+		}
+
+	#$maj =1;
+	$multi = $maj;
+	if ($bi == 2) {
+		$multi = 1;
+		}
+	for($m=0;$m<$multi;$m++) {
+		$c = $m+1;
+		if ($vcf[$i][$j] eq $major[$m][0]) {
+			#$gt = "$sample[$j]-$c/$c";
+			$gt = "$c/$c";
+			}
+		}
+
+	$vcf[$i][$j] = $gt;
+	push(@gt,$gt);
+	}
+}
+

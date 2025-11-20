@@ -1,0 +1,208 @@
+#!/usr/bin/perl
+
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+
+
+if (@ARGV < 2) {
+	print "1.= query for full-length retros\n";
+	#print "2.= approx LTR length (if longer than 2000)\n";
+	print "2.= PBS or IDs to assemble PBS or ID or N for nothing\n";
+	print "3.= additional size range to assemble in ID (e.g. 3400-5000)\n"; 
+	print "adjust max len of LTR if longher than 2300 pb\n";
+	exit;
+	}
+
+#adjust for long LTRs	
+#$ltr_len = 5500;
+$ltr_len = 2500;
+
+$pbs = $ARGV[1];
+
+if ($ARGV[2] ne '') {
+	($be_seg,$en_seg) = ($ARGV[2] =~ /^(\d+)-(\d+)/);
+	$len_seg = $en_seg-$be_seg;
+	print "assemble seg $be_seg - $en_seg\t$len_seg\n";
+	}
+
+
+foreach $infile (<*$ARGV[0]*>) {
+#foreach $infile (<*$ARGV[0]>) {
+
+	($dna) = &pure_sequence($infile);
+
+	# memorize size of element
+	$len = length($dna);
+	$len_TE{$infile} = $len;
+
+	$l2 = (length($dna) - $ltr_len);
+
+	$ltr1 = substr($dna,0,$ltr_len);
+	$ltr2 = substr($dna,$l2,$ltr_len);
+
+	($fasta1) = &mk_fasta($ltr1);
+	($fasta2) = &mk_fasta($ltr2);
+
+	# make temp files from LTR regions
+	$ltr5 = "$infile\_LTR1";
+	$ltr3 = "$infile\_LTR2";
+
+	open (OUT1,">$ltr5");
+	print OUT1 ">$infile\_LTR1\n$fasta1\n";
+	close (OUT1);
+
+        open (OUT2,">$ltr3");
+        print OUT2 ">$infile\_LTR2\n$fasta2\n";
+        close (OUT2);
+
+	print "aligning $ltr5\t$ltr3 \n";	
+
+	$outfile = "$infile\_LTR.pair";
+
+	`water $ltr5 $ltr3 -gapopen=30 -gapextend=0.5 -outfile=$outfile`;
+
+	&find_LTR_pos;
+
+	`rm $ltr5 $ltr3`;
+
+	}
+
+
+print "\n$ltr_ends\n\n";
+
+print "LTR pos:\n";
+print "\n$ltr_pos\n";
+
+print "\nID pos:\n";
+print "\n$ID_pos\n";
+
+
+# parse outfile for beginning and end of LTR ++++++++++++++++++++++++++++++++
+
+sub find_LTR_pos {
+
+open(IN,"<$outfile");
+
+$flag =0;
+
+while (<IN>) {
+
+	($be,$seq,$en) = /^\S+\s+(\d+)\s+(\D+)\s+(\d+)/;
+
+	if ($be) {
+		$flag++;
+
+		if ($flag == 1) { 
+			$be1 = $be;
+			$seq15 = $seq; 
+			}
+
+		if ($flag == 2) { 
+			$be2 = $be; 
+			$seq25 = $seq;
+			}
+
+		$en2 = $en;
+		$seq23 = $seq;
+
+		$en1 = $en_old;
+		$seq13 = $seq_old;
+
+		$en_old = $en;
+		$seq_old = $seq;
+
+		}
+
+	}
+
+close(IN);
+
+$be2 += $l2;
+$en2 += $l2; 
+
+$seq_15 = substr($seq15,0,10);
+$seq_25 = substr($seq25,0,10);
+$seq_13 = substr($seq13,-10,10);
+$seq_23 = substr($seq23,-10,10);
+
+
+$ltr_ends .= "$infile\n$be1\t$seq_15...$seq_13\t$en1\n$be2\t$seq_25...$seq_23\t$en2\n\n";
+
+$l = $len_TE{$infile};
+$ltr_pos .="$infile\t$be1 - $en1\t$be2 - $en2\t$l\n";
+
+# write LTR
+$ltr_seq = substr($dna,0,$en1);
+$outltr = "$infile\_LTR";
+open (OUT,">$outltr");
+($fasta) = &mk_fasta($ltr_seq);
+print OUT ">$outltr\n$fasta\n";
+close (OUT);
+
+# write internal domain if wanted
+if ($pbs eq 'ID') {
+	$len_id = $be2-$en1;
+	$id_seq = substr($dna,$en1,$len_id);
+	$outid = "$infile\_ID";
+	open (OUT,">$outid");
+	($fasta) = &mk_fasta($id_seq);
+	print OUT ">$outid\n$fasta\n";
+	close (OUT);
+
+	$ID_pos .="$infile\t$en1 - $be2\n";
+	print "wrote \t$outid\tlen ID = $len_id\n";
+	}
+
+# assemble PBS plus end of LTR if wanted
+if ($pbs eq 'PBS') {
+	$beg_pbs = $en1-20;
+	$id_seq = substr($dna,$beg_pbs,70);
+	$outid = "$infile\_PBS";
+	open (OUT,">$outid");
+	($fasta) = &mk_fasta($id_seq);
+	print OUT ">$outid\n$fasta\n";
+	close (OUT);
+	
+	print "wrote \t$outid\tlen PBS = $len_id\n";	
+
+	}
+
+# asenble option internal sequence
+if ($ARGV[2] ne '') {
+	$len_id = $be2-$en1;
+	$beg = $en1+$be_seg;
+	$end = $beg+$len_seg;
+	$id_seq = substr($dna,$beg,$len_seg);
+        $outid = "$infile\_seg";
+        open (OUT,">$outid");
+        ($fasta) = &mk_fasta($id_seq);
+        print OUT ">$outid\n$fasta\n";
+        close (OUT);
+
+        print "wrote \t$outid\tlen seg = $len_seg\t$beg-$end\n";
+
+
+	}
+
+
+
+
+print "wrote $outltr\t$outid\tlen ID = $len_id\n";
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

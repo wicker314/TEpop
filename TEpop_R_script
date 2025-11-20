@@ -1,0 +1,88 @@
+#!/usr/bin/perl
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Biomodule;
+
+
+if(@ARGV < 3) {
+	print "1.= vcf file\n";
+	print "2.= number of cores\n";
+	print "3.= norm or rnd (for randomized algorithm)\n";
+	print "4.= -s to only show script\n";
+	exit;
+	}
+
+
+
+$vcf = $ARGV[0];
+$cores = $ARGV[1];
+$rnd = $ARGV[2];
+
+($fam) = ($vcf =~ /^(\S+).vcf/);
+$tab = "pca_tab_$fam";
+$var = "pca_variance_$fam";
+$png = "pca_$fam\.png";
+
+$out = "R_script_$fam";
+open(OUT,">$out");
+
+
+print OUT "library(gdsfmt)
+library(SNPRelate)
+library(ggplot2)
+library(magrittr)\n\n";
+#library(ggrepel)\n\n";
+
+print OUT "vcf.fn <- \"$vcf\"\n\n";
+
+print OUT "snpgdsVCF2GDS(vcf.fn, \"F.gds\", method=\"biallelic.only\")
+genofile <- snpgdsOpen(\"F.gds\")
+snpgdsSummary(genofile)\n\n";
+
+if ($rnd eq 'rnd') {
+	print OUT "pca <- snpgdsPCA(genofile, num.thread=$cores, algorithm=\"randomized\")\n\n";
+	} else {
+	print OUT "pca <- snpgdsPCA(genofile, num.thread=$cores)\n\n";
+	}
+
+print OUT "\n# write variance table\n";
+print OUT "pc.percent <- 100 * pca\$eigenval[1:16]/sum(pca\$eigenval,na.rm = TRUE)\n";
+print OUT "write.table(pc.percent, \"$var\", sep=\"\\t\")\n";
+
+
+print OUT "\n# write a plot with variance in axis lables\n";
+print OUT "png('$png')
+plot(pca\$eigenvect[,1], pca\$eigenvect[,2], xlab= paste(\"PC 1 (\",(round(pc.percent[1],digits=1)),\"%)\"),
+ylab= paste(\"PC 2 (\",(round(pc.percent[2],digits=1)),\"%)\"), type=\"n\")
+points(pca\$eigenvect[,1], pca\$eigenvect[,2],col=c(rgb(0,0,0)),cex=0.1)
+dev.off()\n";
+
+print OUT "\n# create PCA table output\n";
+print OUT "tab <- data.frame(sample.id = pca\$sample.id,
+                  EV1 = pca\$eigenvect[,1],
+                  EV2 = pca\$eigenvect[,2],
+                  EV3 = pca\$eigenvect[,3],
+                  EV4 = pca\$eigenvect[,4],
+                  stringsAsFactors = FALSE)\n\n";
+
+
+print OUT "tab\$chr <- as.factor(substr(tab\$sample.id, 4, 4))\n\n";
+
+
+print OUT "write.table(tab, \"$tab\", sep=\"\\t\")\n";
+
+close(OUT);
+
+print "wrote $out\nrun R\n";
+
+if ($ARGV[3] eq '-s') {
+	open(IN,"$out");
+	while(<IN>) {
+		print;
+		}
+	} else {
+
+	`Rscript $out`;
+
+	print "wrote $tab\n";
+	}

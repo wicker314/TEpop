@@ -1,0 +1,1584 @@
+#!/usr/bin/perl
+
+
+use lib '/home/wicker/data/WICKERsoft/';
+use Tk;
+use Biomodule;
+
+if (@ARGV <2) {
+	print "1.= PCA table exported from R\n";
+	print "2.= age table\n";
+	print "3.= centromere positions (optional)\n";
+	print "4.= fix for fixed canvas size\n";
+	exit;
+	}
+
+
+# extract all subfamily names 
+$infile = $ARGV[0];
+$name_prefix = $ARGV[0];
+
+# extract all species, variety/accession and chromosome names
+@var = ();
+@chr = ();
+@chr_ID = ();
+%chr_ID = ();
+%species = ();
+%genome_code = ();
+@geno = ();
+open(IN,"$ARGV[0]");
+while (<IN>) {
+        $_ =~ s/\"//g;
+        ($sp,$v,$ch) = /^\S+\s+[^_]+_([A-Z][a-z]{3})([^_]{0,8})_\S+_chr([^_-]+)[-_]/;
+        if ($sp) {
+                unless ($v ~~ @var){
+                        push(@var,$v);
+			$species{$v} = $v;
+                        print "new var $sp\t$vi\n";
+                        }
+
+
+		# collect (sub) genomes for chromosome display  
+                ($sub) = ($ch =~ /\d+([A-Za-z]{1,2})/);
+                $gen_ID = "$sp$v\_$sub";
+                unless ($gen_ID ~~ @geno){
+                        push(@geno,$gen_ID);
+                        print "new genome $sub\t$gen_ID\n";
+                        }
+
+		# assign genome code to each TE
+		($te) = /^\S+\s+(\S+)\s/;
+		$genome_code{$te} = $gen_ID;
+
+		# collect chromosome names and make accession-chr index	
+		$chr_ID = "$sp$v\_$ch";
+		unless ($chr_ID ~~ @chr){
+			$var_ID = "$sp\_$v";
+			# get rid of version numbers
+			$var_ID =~ s/p1//g;
+			$var_ID =~ s/v\d+$//;
+                        push(@chr,$chr_ID);
+			$chr_ID{$chr_ID} = $gen_ID;
+			$chr_var{$chr_ID} = $var_ID;
+                        print "new chr $ch\t$chr_ID\tvar=$var_ID\n";
+                        }
+
+                }
+
+
+        }
+close(IN);
+
+if (@var ==0) {
+	print "\nWARNING: FATAL ERROR\nno species/accessions detected ==> check name format\n\n";
+	exit;
+	}
+
+print "genomes: @geno\n";
+print "chromosomes: @chr\n";
+
+
+# get chromosome sizes in hash
+$chr_dir = "/home/wicker/data/dir_chromosomes/";
+$count_chr =0;
+@chr_name = ();
+
+# loop over chr ID's
+foreach $chr_ID (@chr) {
+
+	$var = $chr_var{$chr_ID};
+	($chr) = ($chr_ID =~ /_(\S+)/);
+
+	# get file size of chromosome
+	foreach $file (<$chr_dir*$var*chr$chr*>) {
+			$len = -s $file;
+			$len = int($len*59/60);
+			print "$file\t$len\n";
+			$chr_len{$chr_ID} = $len;
+			push(@chr_name,$ch);
+			$len_genome += $len;
+			$count_chr++;
+			}
+	}	
+
+	
+# get insertion ages 
+@age = ();
+%age = ();
+%age_code = ();
+@TE = ();
+# first get all vaues to calc 90%ile
+open(IN,"$ARGV[1]");
+while (<IN>) {
+        ($te,$age) = /^(\S+)\s+\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/;
+        if ($te) {
+		push(@TE,$te);
+		$age{$te} = $age;
+		push(@age,$age);
+		#print "$te\t$age{$te}\t$age\n";
+		}
+	}	
+
+close(IN);
+
+$count_TE = @TE;
+print "\ntotal TEs: $count_TE\n\n";
+
+# remove top and bottom 5% for color code range
+(@age) = sort{$a <=> $b}(@age);
+$count_age = @age;
+$cut_age = int(0.05*$count_age);
+
+$min_age = $age[$cut_age];
+$max_age = $age[$count_age-$cut_age];
+
+# round to 0.1 Myr
+$min_age = sprintf("%.01f",$min_age);
+$max_age = sprintf("%.01f",$max_age);
+$age_range = $max_age-$min_age;
+$age_step = $age_range/10;
+
+print "$count_age insertion ages\n";
+print "use range $min_age-$max_age\n";
+
+# assign age code to each element
+%age_code = ();
+foreach $te (@TE) {
+	$age = $age{$te}; 
+	if ($age < $min_age) {
+		$age = $min_age;
+		}
+	if ($age > $max_age) {
+		$age = $max_age;
+                }
+
+	# calc age code	
+	$age_code = int(($age-$min_age)/$age_step);
+	$age_code{$te} = $age_code;
+
+	$genome = $genome_code{$te};
+	#print "$te\t$genome\t$age\t$age_code\n";
+	}
+
+
+# make list of all pairs
+print "\nmake list of all pairs\n";
+%pair = ();
+$count_pair = 0;
+foreach $pair (<*__x__*.pair>) {
+	($re,$TE) = ($pair =~ /^(\S+)__x__(\S+)\.pair/); 
+	$pair{$TE} = $pair;
+	$ref_seq = $re;
+	$count_pair++;
+	}
+
+print "total pairs:        $count_pair\n";
+print "reference sequence: $ref_seq\n\n";
+
+
+# get centromere positions (if supplied)
+@cent_pos =();
+if (($ARGV[2] ne 'fix') && ($ARGV[2] ne '')) {
+	open(CEN,"$ARGV[2]");
+	while (<CEN>) {
+		($ch,$pos) = /chr(\d+)\S+\s+(\S+)/;
+		if ($ch) {
+			$cent_pos[$ch] = $pos;
+			print "centromere $ch\t$pos\n";
+			}
+		}
+	close(CEN);
+
+	}
+
+
+
+
+
+# +++++++++++++++++ PART I +++++++++++++++++++++++++++
+# this part defines the visual layout
+# this is all Tk specific stuff 
+
+
+
+# determine screen resolution +++++++++++++++++++++++++++++++++++
+`xrandr > resolution_table`;
+open (IN,"resolution_table");
+RAND: while(<IN>) {
+	($x_axis,$y_axis) = /current\s+(\d+)\s+x\s+(\d+),/;
+	last RAND;
+	}
+close(IN);
+`rm resolution_table`;
+
+
+
+
+# use info to create main window +++++++++++++++++++++++++++++++++
+
+$x_frame = $x_axis-10;
+if ($x_frame > 2000) {
+	$x_frame /=2;
+	}
+$y_frame = $y_axis-70;
+
+# size for fixed width
+if ($ARGV[3] eq 'fix') {
+	$x_frame = 1800;
+	$y_frame = 1000;
+	}
+
+# create functional geometry variable
+$tempfr = "$x_frame x";
+$tempfr =~ s/ //;
+$geometry = "$tempfr$y_frame+10+0";
+print "geometry = $geometry\n";
+
+$test2 = "testest";
+$pattern = '';
+if ($test2 =~ /$pattern/) {
+        print "match2 $pattern\n";
+        }
+
+
+
+$mw = MainWindow -> new;
+$mw -> title ("WICKERsoft supersoftware");
+$mw -> geometry("$geometry");
+$buty = $y_frame-90;
+$canvas_x = $x_frame-40;
+
+
+
+
+# create canvas ++++++++++++++++++++++++++++++++++++
+
+$canvas = $mw -> Scrolled ('Canvas',
+	-cursor, 'crosshair',
+        -scrollbars, 'se',
+        -width, $canvas_x,
+        -height, ($buty - 30),
+        -background, 'white',
+        ) -> place(-x => 10, -y => 10,);
+
+# loop to create buttons +++++++++++++++++++++++++++++
+
+# define arrays with labels and functions for buttons
+
+@buttons = ("process_file", "print", "exit", "write postscript", "write flat", "write_list", "vcf from selection");
+
+@b_comands = ("get_file", "print_landscape", "get_out", "write_ps", "write_flat", "write_list", "write_vcf");
+
+$b_count =0;
+$butx = 10;
+
+foreach (@buttons) {
+
+	$b_command = $b_comands[$b_count];
+	$b_text = $buttons[$b_count];
+
+	$mw -> Button (
+	        -text, "$b_text",
+	        -width, 17,
+		-pady, '-1',
+		-padx, '2',
+		# this exact format for the "-command" is obviously important:
+	        -command, \&$b_command
+	        ) -> place (-x => $butx, -y => $buty);
+
+	$b_count++;
+	$butx +=130;
+	&max_button;
+
+	} # end create buttons -------------------------
+
+
+
+
+# checks if buttons have to be moved to a new line
+
+sub max_button {
+if ($butx > ($x_frame-150)) {
+	$butx = 10;
+	$buty +=25;
+	}
+} # end max_button
+
+
+# loop to create check buttons ++++++++++++++++++++++++++++++++++++++++
+
+$butx +=20;
+&max_button;
+
+@checkbutton = qw(show_age gray    strong no_box     pos100    show_bins correct_pos);
+@cb_commands = qw(age_cb   gray_cb strong_cb box_cb  pos100_cb bins_cb pos_cb);
+
+for ($b=0;$b<@checkbutton;$b++) {
+
+	$cb_command = $cb_commands[$b];
+	$cb_text = $checkbutton[$b];
+
+	$$cb_command=0;
+
+	if ($b<2){
+		$$cb_command=0;
+		}
+
+	$mw -> Checkbutton (
+		-text, "$cb_text",
+		-variable, \$$cb_command,
+		) -> place(-x => ($butx), -y => ($buty));
+	
+	$butx +=100;
+	&max_button;
+	} # end create ckeck buttons ----------------------------------
+
+
+
+
+# loop to create data entries +++++++++++++++++++++++++++++++++++++++++++
+
+@entry = qw(subfam_name ps_name chr_dist window_mb x_zoom y_zoom scale_unit chr_zoom steps bin_size age_zoom dot_size);
+
+$chr_dist = 13;
+$window_mb = 1;
+$x_zoom = 6500;
+$y_zoom = 6500;
+$chr_zoom = 1200;
+$steps = 10;
+$scale_unit = 50;
+$fam_query = '';
+$bin_size = "40";
+$genome_query = '';
+$var_query = '';
+$bin_zoom = 1;
+$age_zoom = 1;
+$dot_size = 1;
+$subfam_name = "A1";
+$ps_name = "PCA_$prefix";
+
+for ($b=0;$b<@entry;$b++) {
+	
+	$label = $entry[$b];
+	$entry = $entry[$b];
+
+	$mw -> Label (
+		-text, "$label",
+		-width, 11,
+		) -> place (-x => ($butx+20), -y => $buty+5);
+
+	$mw -> Entry (
+		-textvariable, \$$entry,
+		-relief, 'sunken',
+		-background, 'white',
+		-width => 11, 
+		) -> place(-x => ($butx+120), -y => ($buty+3));
+
+	$butx +=200;
+	&max_button;
+	} # end create data entries --------------------------------------
+
+
+
+
+# call routine to select rectangles 
+$canvas2 = $canvas->Subwidget("canvas");
+&bind_start();
+
+
+
+
+MainLoop;
+
+
+# start of canvas selection
+sub bind_start {
+# If there is a "Motion" binding, we need to allow the user
+# to finish drawing the item before rebinding Button-1
+# this fcn gets called when the finish drawing the item again
+
+@bind = $canvas2->bind("<Motion>");
+return if ($#bind >=0);
+
+$mw->bind('<ButtonPress-1>' => [\&beg_draw,Ev('x'), Ev('y')]);
+
+}
+
+
+# start drawing
+sub beg_draw {
+my ($canv, $x, $y) = @_;
+$x_sel1 = $canv->canvasx($x);
+$y_sel1 = $canv->canvasy($y);
+
+$mw->bind('<ButtonRelease-1>' => [\&end_draw,Ev('x'), Ev('y')]);
+
+}
+
+
+
+sub end_draw {
+my ($canv, $x, $y) = @_;
+$x_sel2 = $canv->canvasx($x);
+$y_sel2 = $canv->canvasy($y);
+
+print "key $x_sel1, $y_sel1\n";
+print "end $x_sel2, $y_sel2\n";
+$fill4 = "gray60";
+$fill3 = '';
+if ($box_cb ==0) {
+	&TkBox($x_sel1,$y_sel1,$x_sel2,$y_sel2);
+	}
+&display_selection;
+}
+
+
+
+
+
+
+# +++++++++++++ PART II +++++++++++++++++++++++++++++++++
+# subroutines that are called by the buttons 
+
+
+# command routines for generic buttons ++++++++++++++++++
+
+sub get_out {
+	exit;
+	}
+
+sub get_file {
+&display;
+}
+
+
+
+
+# +++++++++++ main subroutine - display annotation ++++++++++++++++++++++++
+
+sub display {
+
+$canvas -> delete("all");
+
+
+# define base positions
+$y_base = 200;
+$x_base = 200;
+$font = "{arial 28}";
+$font2 = "{arial 14}";
+$count_file =0;
+$x_base2 = 0;
+
+# make color spaces
+&mk_color_spec;
+&mk_red;
+&mk_blue;
+&mk_red_blue;
+&mk_color_select;
+
+@heat = @heat_red_blue;
+@rev = reverse(@heat);
+if ($cb_rev_col ==1) {
+        @heat = @rev;
+        }
+
+$count =0;
+$max = 0;
+$chr_old = '';
+
+$x_min = 10000000000;
+$x_max = -1000000000;
+$y_min = 1000000000;
+$y_max = -1000000000;
+
+
+$subfam_count = 1;
+@bin_plot = ();
+@bin_tab = ();
+
+# get x/y max range of PCA
+# and collect data in 2D array +++++++++++++++++++++++++++++++++++
+print "read infile $ARGV[0]\n";
+open (IN, "<$ARGV[0]");
+@data = ();
+$count =0;
+while (<IN>){
+	$_ =~ s/\"//g;
+        ($id,$x,$y) = /^\S+\s+(\S+)\s+(\S+)\s+(\S+)/;
+        if ($id) {
+                if ($x > $x_max) { $x_max = $x; }
+                if ($x < $x_min) { $x_min = $x; }
+                if ($y > $y_max) { $y_max = $y; }
+                if ($y < $y_min) { $y_min = $y; }
+
+		# extract pos info from TE
+		($ch,$pos) = ($id =~ /chr(\d+)[^-]+-(\d+)/);
+
+		# get info on genome/species and age
+		$gen = $genome_code{$id};
+		$age = $age_code{$id};
+
+		print "$count\t$id\t$ch\t$pos\t$age\t$gen\n";
+
+		# corrext pos if small elements are used (i.e. 100 bp position step
+		if ($pos_cb ==1) {
+			$pos /=10;
+			}
+
+		# suck all x,y values into array
+                $data[$count][0] = $x;
+                $data[$count][1] = $y;
+		$data[$count][2] = $ch;
+		$data[$count][3] = $gen;
+		$data[$count][4] = $pos;
+		$data[$count][5] = $age;
+		$data[$count][8] = $var; # leave 6,7 for canvas pos later
+		$data[$count][9] = $id;
+
+                $count++;
+		#}
+                }
+        }
+
+print "\nvar= total $count entries\n\n";
+
+
+@coord = qw(x_min x_max y_min y_max);
+
+# round min and max values, add 10% to range
+foreach $c (@coord) {
+        $r = (int(($$c+$$c*0.1)*1000))/1000;
+        $$c = $r;
+        }
+
+# make label
+$lab =  "range x:\t$x_min\t$x_max\n";
+$lab .= "range y:\t$y_min\t$y_max\n";
+$lab .= "values: $count\n\n";
+
+$x = $x_base + $x_max*$x_zoom+150;
+$y = $y_base-80;
+#&TkText($x,$y,$lab,'sw','black',$font);
+
+
+
+
+# draw grid ++++++++++++++++++++++++
+$delta = $x_max-$x_min;
+$x_step = $delta/$steps;
+
+$delta = $y_max-$y_min;
+$y_step = $delta/$steps;
+
+# ... in y direction
+for($x=$x_min;$x<$x_max;$x+=$x_step) {
+	$x1 = $x_base + int($x*$x_zoom);
+	$x2 = $x1;
+
+	$y1 = $y_base + int($y_min*$y_zoom);
+	$y2 = $y_base + int($y_max*$y_zoom);
+
+	$fill = "gray60";
+	&TkLine($x1,$y1,$x2,$y2,$fill);
+
+	# add scale
+	$lab = (int($x*1000))/1000;
+	&TkText($x1,$y1-5,$lab,'s','black');
+
+
+	}
+
+# ... and in x direction
+for($y=$y_min;$y<$y_max;$y+=$y_step) {
+        $x1 = $x_base + int($x_min*$x_zoom);
+        $x2 = $x_base + int($x_max*$x_zoom);
+
+        $y1 = $y_base + int($y*$y_zoom);
+        $y2 = $y1;
+
+        $fill = "gray60";
+        &TkLine($x1,$y1,$x2,$y2,$fill);
+
+        # add scale
+        $lab = (int($y*1000))/1000;
+        &TkText($x1-5,$y1,$lab,'e','black');
+        }
+
+
+
+
+# make age color legend ++++++++++++++++++++++++++++
+
+for($i=0;$i<10;$i++) {
+	$val = 31-$i*3;
+	$fill = $heat_red[$val];
+	$fill2 = 'black';
+
+	# make boxes
+	$x1 = $x_base+$x_max*$x_zoom-60;
+	$x2 = $x1+10;
+	$y1 = $y_base + int($y_max*$y_zoom)+30+$i*15;
+	$y2 = $y1+10;
+
+	&TkBox($x1,$y1,$x2,$y2,$fill,$fill2);
+
+	# make label
+	$mya1 = $min_age+$i*$age_step;
+	$mya2 = $mya1+$age_step;
+	$mya1 = sprintf("%.1f",$mya1);	
+	$mya2 = sprintf("%.1f",$mya2);
+	$mya = "$mya1 - $mya2";
+	&TkText($x2+10,$y1,$mya,'nw','black');
+
+	print "$mya\n";
+
+	# make chromosome age legend
+
+
+	}
+
+
+
+# display all samples as dots ++++++++++
+# make hash with genome colors
+@col  = qw(red blue green chocolate1 gold1 black magenta gold3 orange black  LightSkyBlue01  magenta black LightSkyBlue01 RosyBrown1);
+
+@col  = qw(red blue green orange magenta brown gold1 #555555 #FF8888 #88FF88 #8888FF gold2 gray30);
+
+# stronger colors to hilite subgenomes
+if ($strong_cb ==1) {
+	qw(red blue green orange magenta brown gold1 #555555 #FF8888 #88FF88 #8888FF gold2 gray30);
+	}
+
+# make genome legend
+for($i=0;$i<@geno;$i++) {
+        $fill = $col[$i];
+        $fill2 = 'black';
+
+        # make boxes
+        $x1 = $x_base+$x_max*$x_zoom-200;
+        $x2 = $x1+10;
+        $y1 = $y_base + int($y_max*$y_zoom)+60+$i*15;
+        $y2 = $y1+10;
+
+        &TkBox($x1,$y1,$x2,$y2,$fill,$fill2);
+
+        # make label
+        $lab = $geno[$i];
+        &TkText($x2+10,$y1,$lab,'nw','black');
+
+        print "genome label: $lab\n";
+        }
+
+# make legend label
+$y1 = $y_base + int($y_max*$y_zoom)+30;
+$lab = "Species/\nSubgenome";
+&TkText($x1,$y1,$lab,'nw','black');
+
+
+%fill = ();
+for($i=0;$i<@geno;$i++) {
+	$geno = $geno[$i];
+	$fill{$geno} = $col[$i];
+	}
+
+
+for($i=0;$i<$count;$i++) {
+
+	$xs = $data[$i][0];
+	$ys = $data[$i][1];
+	$ch = $data[$i][2];
+	$genome = $data[$i][3];
+	$age = $data[$i][5];
+	$var = $data[$i][8];
+
+	$x1 = $x_base + int($xs*$x_zoom);
+	$x2 = $x1 +1;
+
+	$y1 = $y_base + int($ys*$y_zoom);
+	$y2 = $y1 +1;
+
+	# by default, color by genome
+	$fill = $fill{$genome};
+
+	# use age color if button is checked
+	if ($age_cb ==1) {
+		$val = 31-3*$age;
+		if ($val <0) {
+			$val =0;
+			}
+		if ($val > 31) {
+                        $val =31;
+                        }
+
+		$fill = $heat_red[$val];
+		}
+
+	# use neutral grey for all if button ich checked
+        if ($gray_cb ==1) {
+                $fill = "gray70";
+                }
+
+
+	#print "$i\t$ch\t$genome\n";
+	#$fill ="black";
+
+	if ($strong_cb ==0) {
+		#$fill ="gray70";
+		}
+
+	if (($hilite ne '') && ($hilite eq $var)) {
+		#		$fill = "red";
+			}
+
+	&TkBox($x1,$y1,$x2,$y2,$fill,$fill);
+
+
+
+	# add canvas pos to data array
+	$data[$i][6] = $x1;
+	$data[$i][7] = $y1;
+
+
+        }
+
+
+
+
+
+# make empty chromosome boxes +++++++++++++++++++++++++
+print "draw chromosomes\n";
+$chr_max = 0;
+$chr_hi = 20;
+
+if ($bins_cb ==1) {
+	$chr_hi = 10;
+	$gray = "gray80";
+	$black = "black";
+	} 
+
+# assign y values to each genome
+for($i=0;$i<@geno;$i++) { 
+	$sub = $geno[$i];
+	$y = $i*8;
+	$y_genome{$sub} = $y;
+	}
+	
+if ($chr_dist <= 20) {
+	$chr_hi = int($chr_dist*2/3);
+	}
+
+# draw empty chromsomes
+for($i=0;$i<@chr;$i++) {
+	$chr = $chr[$i];
+	$genome = $chr_ID{$chr};
+	$y_genome = $y_genome{$genome};
+
+	($chr_num) = ($chr =~ /_(\d+)/);
+
+	$chr_len = int($chr_len{$chr}/1000);
+
+	print "draw $chr\t$chr\t$chr_num\t$genome\t$y_genome\t$chr_len\n";
+
+	if ($chr_max < $chr_len) {
+		$chr_max = $chr_len;
+		}
+
+	$x1 = $x_base+$x_max*$x_zoom+240;
+	$x2 = $x_base+$x_max*$x_zoom+240+int($chr_len/$chr_zoom);
+	$y1 = $y_base + int($y_min*$y_zoom)+$chr_dist*$chr_num+$y_genome*$chr_dist;
+	#$y2 = $y1+$chr_dist-10;
+	$y2 = $y1+$chr_hi;
+
+	&TkBox($x1,$y1,$x2,$y2);
+
+	# make gray chromosome and y-axis if bins are shown
+	if ($bins_cb ==1) {
+		&TkBox($x1,$y1,$x2,$y2,$gray,$black);
+		$x_chr = $x2 + 20;
+		$y_chr = $y1;
+		&y_scale;
+		}
+
+
+	&TkText($x1-5,$y1,$chr,'ne','black');
+
+	}
+
+
+# draw centromere positions (if provided)
+for($i=1;$i<@cent_pos;$i++) {
+	print "$sub\t$cent_pos[$i]\n";
+	($be,$en) = ($cent_pos[$i] =~ /^(\S+)-(\S+)/);
+	$be*=1000;
+	$en*=1000;
+	$x1 = $x_base+$x_max*$x_zoom+240+int($be/$chr_zoom);
+	$x2 = $x_base+$x_max*$x_zoom+240+int($en/$chr_zoom);
+	$y_genome = $y_genome{$sub};
+	$y1 = $y_base + int($y_min*$y_zoom)+$chr_dist*$i+$y_genome*$chr_dist+$chr_hi;
+	$y2 = $y1+3;
+	$fill = 'blue';
+	&TkBox($x1,$y1,$x2,$y2,$fill);
+	print "$sub\t$cent_pos[$i]\t$be-$en\t$x1\t$y1\n";
+	}
+
+
+
+# draw Mb one sacle at the top +++++++++++++++++++++++++++++++
+$y_chr = $y_base + int($y_min*$y_zoom)+$chr_dist*(@chr_name)+100;
+$y_chr = 750;
+if ($bins_cb==1) {
+	$y_chr += 2*$chr_dist-$chr_dist/2;
+	}
+
+#$y_chr = $y_base + int($y_min*$y_zoom)+$chr_dist*(@chr_name+7);
+$x_chr = $x_base+$x_max*$x_zoom+240;
+
+$y_chr = $y_base + int($y_min*$y_zoom)+10;
+&x_scale;
+
+
+
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# display selection by mouse ++++++++++++++++++++++++++++++
+sub display_selection {
+
+$val = $subfam_count-1;
+$subfam_count++;
+$fill = $fill[$val];
+
+print "selected TEs:\n";
+
+@flat_list = ();
+$count_select = 0;
+
+# loop through all data, select those that are in selected PCA range
+for($i=0;$i<$count;$i++) {
+
+	$age = $data[$i][5];
+	$xp1 = $data[$i][6];
+        $yp1 = $data[$i][7];
+	$xpca = $data[$i][0];
+	$ypca = $data[$i][1];
+	$genome = $data[$i][3];
+
+
+	#print "$xp1\t$yp1\t<=>\t$x_sel1\t$x_sel2\t$y_sel1\t$y_sel2\n";
+
+	if (($xp1 >= $x_sel1) && ($xp1 <= $x_sel2) && ($yp1 >= $y_sel1) && ($yp1 <= $y_sel2)) { 
+
+		# display on chromosome
+		$chr = $data[$i][2];
+		$gen = $data[$i][3];
+		$pos = $data[$i][4];
+		$age = $data[$i][5];		
+		$var = $data[$i][8];	
+		$id  = $data[$i][9];
+		$age_MYA = $age{$id};
+
+		$cp = "$chr$gen-$pos";
+
+		# collect data for flatfile and PCA list
+		$flat_list[$count_select][0] = $cp;
+		$flat_list[$count_select][1] = $xpca;
+		$flat_list[$count_select][2] = $ypca;
+		$flat_list[$count_select][3] = $chr;
+		$flat_list[$count_select][4] = $gen;
+		$flat_list[$count_select][5] = $var;
+		$flat_list[$count_select][6] = $id;
+		$flat_list[$count_select][7] = $age;
+		$flat_list[$count_select][8] = $age_MYA;
+
+		#print "select $var $cp\n";
+
+		$count_select++;	
+
+		# determine y level for subgenome
+		($sub) = ($chr =~ /\d+(\S+)/);
+		$y_genome = $y_genome{$gen};
+		print "select $var cp=$cp\tchr: $chr\tsubgenome $gen $sub\t==> $y_genome\n";
+
+
+		if ($age_cb ==1) {
+			$col_val = 31-3*$age;
+
+			if ($col_val <0) {
+				$col_val =0;
+				}
+			if ($col_val > 30) {
+                        	$col_val =30;
+                        	}
+
+			$fill = $heat_red[$col_val];
+			}
+
+
+                if ($strong_cb ==1) {
+                        $fill = $fill{$genome};
+                        }
+
+
+		# display subfam on chromosomes
+		$x1 = $x_base+$x_max*$x_zoom+240+int($pos/$chr_zoom);
+
+		# check button for 100-based positions
+		if ($pos100_cb ==1) {
+			$x1 = $x_base+$x_max*$x_zoom+240+int($pos/$chr_zoom/10);
+			}
+
+
+		$y3 = $y_base + int($y_min*$y_zoom)+$chr_dist*$chr+$y_genome*$chr_dist+1;
+		#$y4 = $y3+$chr_dist-11;
+		$y4 = $y3+$chr_hi-2;
+
+
+		#print "$cp\t$x1\t$y3\n";
+
+		if ($age_cb ==1) {
+			#$y3+=2*$age;
+			}
+
+
+                if ($gray_cb ==1) {
+			#$fill = "gray20";     
+			}
+
+		# show if bins cb is not checked
+		if ($bins_cb ==0) {
+			&TkLine($x1,$y3,$x1,$y4,$fill);
+			}
+
+		# color new subfamily 
+		$x1 = $xp1;
+		$x2 = $xp1+$dot_size;
+		$y1 = $yp1;
+		$y2 = $yp1+$dot_size;
+		&TkBox($x1,$y1,$x2,$y2,$fill,$fill);
+
+		}
+
+
+	}
+
+print "\nselected $count_select copies\n";
+
+# make subfamily legend +++++++++++++++++++++++
+# make box
+$x1 = $x_base+$x_max*$x_zoom-350;
+$x2 = $x1+12;
+$x3 = $x2+10;
+$y1 = $y_base + int($y_max*$y_zoom)+$subfam_count*20;
+$y2 = $y1+12;
+
+# make text
+$sf = "$subfam_name ($count_select)";
+$fill1 = "black";
+&TkBox($x1,$y1,$x2,$y2,$fill,$fill1);
+&TkText($x3,$y1,$sf,'nw','black',$font);
+
+# calculate expected number per bins
+$bin_tot = int($len_genome/1000000/$bin_size);
+$exp = (int($count_select/$bin_tot*10))/10;
+$exp[$subfam_count] = $exp; 
+
+
+# make age distribution as line
+$bin0 = 0;
+$x_old = $x_base+$x_max*$x_zoom-350;
+$y_old = $y_base + int($y_max*$y_zoom)+350;
+
+for($a=0;$a<6;$a+=0.1) {
+
+	$sum =0;
+	$ae = $a+0.1;
+
+	# loop trough selection, collect age group
+	for($f=0;$f<$count_select;$f++) {
+		$mya = $flat_list[$f][8];
+		if (($mya >= $a) && ($mya < $ae)) {
+			$sum++;
+			}
+		}
+
+	print "$a\t$ae\t$sum\n";
+
+	$y2 = $y_base + int($y_max*$y_zoom)+350-int($sum/$age_zoom);
+	$x2 = $x_old+3;
+
+	&TkLine($x_old,$y_old,$x2,$y2,$fill);
+	$x_old = $x2;
+	$y_old = $y2;
+	}
+
+
+
+
+
+# display selection in chromosome bins +++++++++++++++++++++++
+for($i=0;$i<@chr_name;$i++) {
+        $chr = $chr_name[$i];
+	($chr1,$genome) = ($chr =~ /^(\d+)(\S+)/);
+
+	#print "$chr Bins +++++++++++++\n";
+
+	($sub) = ($chr =~ /\d+(\S+)/);
+	$y_genome = $y_genome{$sub};
+
+	$chr_len = int($chr_len{$chr}/1000);
+
+	# loop thru chromosome in bins
+	for($j=0;$j<$chr_len;$j+=($bin_size*1000)) {
+
+		$bin_be = $j;
+		$bin_en = $j+$bin_size*1000;
+		$bin_count =0;
+
+		$bin_count_old = $bin_plot[$i][$j];
+
+		# make table output
+		$line = "BIN_$bin_en";
+
+		# loop thru selection and check if entry lies in bin 
+		for($k=0;$k<$count_select;$k++) {
+			
+			$chr2 = $flat_list[$k][3];
+			$genome2 = $flat_list[$k][4];
+			($cp) = ($flat_list[$k][0] =~ /-(\d+)/);
+
+			#print "$chr2\t$genome2\t$cp\t<=>\t$bin_be\t$bin_en\n";
+
+			if (($genome2 eq $genome) && ($chr2 eq $chr1) && ($cp >= $bin_be) && ($cp <= $bin_en)) {
+				$bin_count+=4;
+				}
+			}
+
+		$bin_tab[$i][$j][$subfam_count] = $bin_count/4;
+
+		# deal with last bin
+		if ($bin_en > $chr_len) {
+			# calc fraction of last bin
+			$deltax = (($chr_len-$bin_be)/1000);
+			$factor = $bin_size/($bin_size-$deltax);
+			#$bin_count *= $factor;
+			$bin_en = $chr_len;
+			}
+
+		$bin_plot[$i][$j] += $bin_count;
+
+
+		# display bin if button is checked +++++++++++++++++++
+
+		if ($bins_cb ==1)  {
+
+		$x1 = $x_base+$x_max*$x_zoom+240+int($bin_be/$chr_zoom);
+		$x2 = $x_base+$x_max*$x_zoom+240+int($bin_en/$chr_zoom)-3;
+
+		$y3 = $y_base + int($y_min*$y_zoom)+$chr_dist*$chr1+$y_genome*$chr_dist-2-$bin_count_old/$bin_zoom;
+		$y4 = $y3-$bin_count/$bin_zoom;
+
+		&TkBox($x1,$y3,$x2,$y4,$fill,$fill);
+		} # end display bins --------------------------------		
+
+
+		# make table output
+		$bin_sum =0;
+		for($s=0;$s<=$subfam_count;$s++) {
+			$bin_sum+=$bin_tab[$i][$j][$s];
+			$line .= "\t$bin_tab[$i][$j][$s]";
+			}
+		$line .= "\tS=$bin_sum";
+		# calc expected values
+		$sum_tmp =0;
+		for($s=0;$s<=$subfam_count;$s++) {
+			$sum_tmp+=$exp[$s];
+			}
+
+		for($s=0;$s<=$subfam_count;$s++) {
+                        $exp = (int($exp[$s]/$sum_tmp*$bin_sum*10))/10;
+                        $line .= "\t$exp";
+                        }
+
+
+		#print "$line\n";
+
+		}
+
+	
+
+
+
+	}
+
+
+
+
+}
+
+
+# make x-axis scale ++++++++++++++++++++++
+sub x_scale {
+
+my($i);
+my($x1);
+my($y1);
+my($x2);
+my($y2);
+
+$unit_bp = $scale_unit*1000;
+for($i=0;$i<$chr_max;$i+=$unit_bp) {
+	
+        $val = $i/1000;
+        $x1 = $x_chr+int($i/$chr_zoom);
+        $y1 = $y_chr-10;
+        $y2 = $y_chr-15;
+        &TkLine($x1,$y1,$x1,$y2);
+	&TkText($x1,$y2-3,$val,'s','black');
+	#&TkText($x1,$y2-5,$val,'s','black',$font2);
+        }
+
+# baseline
+$x1 = $x_base;
+$x2 = $x_base+int($max/$x_zoom);
+&TkLine($x1,$y1,$x2,$y1);
+
+}
+
+
+# make y-axis scale ++++++++++++++++++++++
+sub y_scale {
+
+my($i);
+my($x1);
+my($y1);
+my($x2);
+my($y2);
+
+$y_max = ($chr_dist-20)*$bin_zoom;
+$unit = int($y_max/5);
+for($i=0;$i<$y_max;$i+=$unit) {
+
+        $val = $i;
+        print "scale = $val\n";
+        $x1 = $x_chr;
+	$x2 = $x1 +5;
+        $y1 = $y_chr-$i/$bin_zoom;
+        &TkLine($x1,$y1,$x2,$y1);
+        &TkText($x1+10,$y1,$val,'w','black',$font2);
+        }
+
+# baseline
+$x1 = $x_base;
+$x2 = $x_base+int($max/$x_zoom);
+&TkLine($x1,$y1,$x2,$y1);
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+$canvas -> configure (-scrollregion => [$canvas -> bbox("all")]);
+
+} # end display annotation -------------------------------------------------
+
+
+# write flatfile +++++++++++++++++++++++++++
+
+sub write_flat {
+
+$out_flat = "PCA_flat_$name_prefix\_$subfam_name";
+open(FLAT,">$out_flat");
+
+for($i=0;$i<$count_select;$i++) {
+
+	$file = $flat_list[$i][6];
+	$age = $flat_list[$i][7];
+
+	($dna) = &pure_sequence($file);
+	($fasta) = &mk_fasta($dna);
+	print FLAT ">$file $subfam_name $age\n$fasta\n";
+	}
+
+close(FLAT);
+
+print "\n\nwrote $out_flat\n\n";
+
+}
+
+
+
+# write list of selected TEs +++++++++++++++++++++++++++
+
+sub write_list {
+
+$out_list = "PCA_list_$name_prefix\_$subfam_name";
+open(PCA,">$out_list");
+
+# make list for age only
+$age_list = "PCA_age_$name_prefix\_$subfam_name";
+open(AGE,">$age_list");
+
+# make list for age only
+$pair_list = "PCA_pairs_$name_prefix\_$subfam_name";
+open(PAIR,">$pair_list");
+
+# put refseq and age distribution on the list for easier copying
+print PAIR "$ref_seq\n$ARGV[1]\n";
+
+
+for($i=0;$i<$count_select;$i++) {
+
+        $name = $flat_list[$i][6];
+        $xpca = $flat_list[$i][1];
+        $ypca = $flat_list[$i][2];
+	$age_code = $flat_list[$i][7];
+	$age = $age{$name};
+	$pair = $pair{$name};
+
+        print "$i\t$file\t$name\t$prefix\t$xpca\t$ypca\t$age_code\t$age\n";
+        print PCA "$name\t$age\t$xpca\t$ypca\n";
+	print AGE "$name\t$age\t$xpca\t$ypca\n";
+	print PAIR "$name\n$pair\n";
+
+        }
+
+close(PCA);
+close(AGE);
+close(PAIR);
+
+print "\n\nwrote $out_list\t($i entries)\n";
+print "wrote $age_list\t($i entries)\n";
+print "wrote $pair_list\t($i entries)\n\n";
+
+}
+
+
+# write list of selected TEs +++++++++++++++++++++++++++
+
+sub write_vcf {
+
+$out_list = "PCA_list_$name_prefix\_$subfam_name";
+open(PCA,">$out_list");
+
+
+for($i=0;$i<$count_select;$i++) {
+
+        $name = $flat_list[$i][6];
+        $xpca = $flat_list[$i][1];
+        $ypca = $flat_list[$i][2];
+        $age = $flat_list[$i][7];
+
+        print "$i\t$file\t$name\t$prefix\t$xpca\t$ypca\n";
+        print PCA "$name\t$age\t$xpca\t$ypca\n";
+
+        }
+
+close(PCA);
+
+print "\n\nwrite vcf for $out_list\t($i entries)\n\n";
+
+# run vcf for selected TEs
+`pair_to_vcf_from_list $out_list 0.05 100000`;
+
+
+print "\n\nwrote vcf for $out_list\t($i entries)\n\n";
+
+}
+
+
+
+
+
+
+
+# make red color spec
+sub mk_red {
+
+@heat_red = ();
+
+for($i=0;$i<32;$i++) {
+
+        # calculate color code in hexadec system +++++
+
+        $modulo = $i%16;
+        $down = 15-$modulo;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+        $hexval2 = sprintf("%x", $down);
+        $hexval2 =~ tr/a-z/A-Z/;
+
+        # go from black to red
+        if ($integer == 0) {
+        $red = "$hexval$hexval";
+        $green = "00";
+        $blue = "00";
+        }
+
+        # go from red to yellow 
+        if ($integer == 1) {
+        $red = "FF";
+        $green = "$hexval$hexval";
+        $blue = "00";
+        }
+
+        $color = "#$red$green$blue";
+        push(@heat_red,$color);
+
+}
+
+
+}
+
+
+
+
+
+# make blue color spec
+sub mk_blue {
+
+@heat_blue = ();
+
+for($i=0;$i<32;$i++) {
+
+        # calculate color code in hexadec system +++++
+
+        $modulo = $i%16;
+        $down = 15-$modulo;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+        $hexval2 = sprintf("%x", $down);
+        $hexval2 =~ tr/a-z/A-Z/;
+
+        # go from black to blue
+        if ($integer == 0) {
+        $blue = "$hexval$hexval";
+        $green = "00";
+        $red = "00";
+        }
+
+        # go from blue to yellow 
+        if ($integer == 1) {
+        $blue = "FF";
+        $green = "$hexval$hexval";
+        $red = "00";
+        }
+
+        $color = "#$red$green$blue";
+        push(@heat_blue,$color);
+
+}
+
+
+}
+
+
+
+
+
+# make red-blue color spec
+sub mk_red_blue {
+
+@heat_red_blue = ();
+
+for($i=0;$i<49;$i++) {
+
+        # calculate color code in hexadec system +++++
+
+        $modulo = $i%16;
+        $down = 15-$modulo;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+        $hexval2 = sprintf("%x", $down);
+        $hexval2 =~ tr/a-z/A-Z/;
+
+        # go from black to red
+        if ($integer == 0) {
+        $red = "$hexval$hexval";
+        $green = "00";
+        $blue = "00";
+        }
+
+        # go from red to yellow 
+        if ($integer == 1) {
+        $red = "FF";
+        $green = "$hexval$hexval";
+        $blue = "00";
+        }
+
+        # go from blue to purple
+        if ($integer == 2) {
+        #$red = "$hexval$hexval";
+        #$green = "00";
+        #$blue = "FF";
+        }
+
+        # go from blue to green 
+        if ($integer == 2) {
+        $blue = "$hexval2$hexval2";
+        $green = "$hexval$hexval";
+        $red = "00";
+        }
+
+        # make gree buffer at the end
+        if ($integer == 3) {
+                $blue = "00";
+                $green = "FF";
+                $red = "00";
+                }
+
+        $color = "#$red$green$blue";
+        push(@heat_red_blue,$color);
+
+}
+
+
+}
+
+
+sub mk_color_select {
+
+@fill = qw(#000000 #FF0000 #88CC22 #0044FF  #FFCC00 #00BBFF  #FF8800 #EE00FF #999999 #CCCCCC #00EE33 #00FF88 #222222 );
+
+#@fill = qw(#DDDDDD #AAAAAA #888888 #666666 #333333   #000000);
+
+#@fill = qw(#FFCC00 #EE00FF #00BBFF #EE00FF #999999 #CCCCCC #00EE33 #00FF88 #222222 );
+#@fill = qw(#88CC22 #88CC22 #FF0000  #FF0000 #0044FF #0044FF #FFCC00  #FFCC00 #88CC22 #0044FF  #FFCC00 #00BBFF  #FF8800 #EE00FF #999999 #CCCCCC #00EE33 #00FF88 #222222 );
+
+}
+
+
+
+
+# make ifull color spectrum in hexadec code
+sub mk_color_spec {
+
+@hexa = ();
+
+for($i=0;$i<112;$i++) {
+
+        # calculate color code in hexadec system +++++
+
+        $modulo = $i%16;
+	$down = 15-$modulo;
+        $integer = int($i/16);
+        $hexval = sprintf("%x", $modulo);
+        $hexval =~ tr/a-z/A-Z/;
+	$hexval2 = sprintf("%x", $down);
+	$hexval2 =~ tr/a-z/A-Z/;
+
+	# go from black to red
+
+        if ($integer == 0) {
+        $red = "$hexval$hexval";
+        $green = "00";
+        $blue = "00";
+	$rem = "black to red";
+        }
+
+        # go from red to yellow	
+        if ($integer == 1) {
+        $red = "FF";
+        $green = "$hexval$hexval";
+        $blue = "00";
+	$rem = "red to yellow";
+        }
+
+        # go from yellow to green 
+        if ($integer == 2) {
+        $red = "$hexval2$hexval2";
+        $green = "FF";
+        $blue = "00";
+	$rem = "yellow to green";
+        }	
+
+        # go from green to turquoise
+        if ($integer == 3) {
+        $red = "00";
+        $green = "FF";
+        $blue = "$hexval$hexval";
+	$rem = "green to turquoise";
+        }
+
+	# go from turquoise to blue
+        if ($integer == 4) {
+        $red =  "00";
+        $green = "$hexval2$hexval2";
+        $blue = "FF";
+	$rem = "turquoise to blue";
+        }
+
+        # go from blue to purple
+        if ($integer == 5) {
+        $red =  "$hexval$hexval";
+        $green = "00";
+        $blue = "FF";
+	$rem = "blue to purple";
+        }
+
+	# go from black to white
+        if ($integer == 6) {
+        $red =  "$hexval$hexval";
+        $green = "$hexval$hexval";
+        $blue = "$hexval$hexval";
+	$rem = "black to white";
+        }
+
+
+	$color = "#$red$green$blue";
+
+        #print "i=$i\tint = $integer\thexval = $hexval\tdown = $hexval2\tcolor = $color\t$rem\n";
+
+        push(@hexa,$color);
+        }
+
+} 
+
+
+
+
+
+
+sub write_ps {
+
+&write_ps_to_jpg($ps_name);
+
+
+} # end save postscript -----------------------------------
+
+
+
+
+
+
+
+# subroutine print screen +++++++++++++++++++++++++++++++++
+
+sub print_landscape {
+
+$ps_out = "print.ps";
+
+$canvas -> postscript(
+        -file, "$ps_out",
+        -rotate,1,
+        -pageheight, '500',
+        -pagewidth, '750'
+        );
+
+`lp $ps_out`;
+#`rm $ps_out`;
+
+} # end print screen -------------------------------------
+
+
+

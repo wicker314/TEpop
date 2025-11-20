@@ -58,18 +58,27 @@ my($sum);
 my($i);
 my($avg);
 my($variance);
+my($median);
+my($mid);
 my($std);
 my($sq);
 my(@sort);
 
+# sort incoming array
+(@sort) = sort{$a <=> $b} (@number);
+@number = @sort;
+
 # calc avg
 $sum = 0;
+
+if (@number > 0) {
 
 for($k=0;$k<@number;$k++) {
         $sum += $number[$k];
         #print "$j\t$hit[$k][0]\t-$hit[$k][1]\t$sizes[$k]\n";
         }
-$avg = (int($sum/@number*10))/10;
+$avg = $sum/@number;
+$avg = sprintf("%.03f",$avg);
 
 # calc standard deviation
 $sum = 0;
@@ -78,11 +87,22 @@ for($k=0;$k<@number;$k++) {
         $sum+=$sq;
         }
 $variance = $sum/@number;
-$std = (int((sqrt($variance))*100))/100;
+$std = sqrt($variance);
+$std = sprintf("%.03f",$std);
+$variance = sprintf("%.03f",$variance);
 
-return ($avg,$std);
+# make median
+(@sort) = sort{$a <=> $b} (@number);
+$mid = int(@sort/2);
+$median = $sort[$mid];
 
+} else {
+$avg = "NA";
+$std = "NA";
+$median = "NA";
+}
 
+return ($avg,$median,$std,$variance);
 
 
 
@@ -547,7 +567,7 @@ while (<IN_BLAST>){
 		# grab everything after the ID
 		($rem) = /$ID\s+(\S.+)/;
 
-		$rem =~ s/;//g;
+		$rem =~ s/;/:/g;
 
 		if ($rem eq ''){
 			$rem = $ID;
@@ -568,7 +588,7 @@ while (<IN_BLAST>){
         if ($de_second ==1) {
                 ($string) = /^([^>].+)$/;
                 unless ($string =~ /Length/) {
-                        $string=~ s/;//g;
+                        $string=~ s/;/:/g;
                         $this_hit .= " $string";
                         }
                 }
@@ -989,8 +1009,10 @@ for($i=0;$i<@seq1;$i++) {
 
 #print "$len\t$match/$align\n";
 
+$rel = "NA";
 if ($align > 0) {
-	$rel = (int($match/$align*10000))/100;
+	$rel = $match/$align*100;	
+	$rel = sprintf("%.02f",$rel);
 	}
 
 return ($comp,$rel);
@@ -1052,6 +1074,49 @@ $gc = $GC/100;
 return ($gc);
 
 }
+
+# &&&&&&&&&&&&&&&&&& NEW SUBROUTINE - best_match
+# find best gap-free match in 2 seq
+
+sub best_match {
+
+my($seq1,$seq2) = @_;
+my(@seq1) = split('',$seq1);
+my(@seq2) = split('',$seq2);
+my($i);
+my($j);
+my($match);
+my($best_match);
+my($pos1);
+my($pos2);
+
+for($i=0;$i<@seq1;$i++) {
+        $pos1 = $i;
+        $match = '';
+
+        for($j=0;$j<@seq2;$j++) {
+
+                $pos2 = $j;
+                $pos1 = $i;
+                $match = '';
+                while (($seq1[$pos1] eq $seq2[$pos2]) && ($pos1 < @seq1) && ($pos2 < @seq2)) {
+                        $match .= $seq1[$pos1];
+			#print "$pos1\t$pos2\t$seq1[$pos1]\t$seq2[$pos2]\t$match\n";
+                        $pos1++;
+                        $pos2++;
+                        }
+                if (length($match) >= length($best_match)) {
+                        $best_match = $match;
+                        }
+                }
+        }
+
+return($best_match);
+
+}
+
+
+
 
 # &&&&&&&&&&&&& NEW SUBROUTINE - base_composition
 
@@ -1327,6 +1392,7 @@ sub codons {
 
 my ($codon) = @_;
 
+# make uppercase
 $codon = uc $codon;
 
 my (%genetic_code) = (
@@ -1467,7 +1533,7 @@ if (($ratio > 0) && ((1-2*($t/$s)-($v/$s)) > 0)) {
  #print "$k2p\n";
 
  #the STD of K2p
- #split the whole moster-formula in four parts for easier editing
+ #split the whole monster-formula in four parts for easier editing
  my $t1 = 1/(1-2*($t/$s)-($v/$s))**2*($t/$s);
  my $t2 = (0.5 * ((1/((1-2*($t/$s)-($v/$s))))+(1/(1-2*($v/$s)))))**2*($v/$s);
  my $t3 = 1/(1-2*($t/$s)-($v/$s))*($t/$s);
@@ -1485,10 +1551,13 @@ if (($ratio > 0) && ((1-2*($t/$s)-($v/$s)) > 0)) {
 my @out = ($div_time, $div_time_std);
 
 
-    return(@out);
+return(@out);
 } else {
 my $div_time = "NO DATE: 1-2*(TV/SITES) < 0";
 my $div_time_std = "NO DATE: 1-2*(TV/SITES) < 0";
+my $div_time = "NA";
+my $div_time_std = "NA";
+print "DATE WARNING:NOT USED\n";
 my @out = ($div_time, $div_time_std);
 return(@out);
 }
@@ -1632,15 +1701,16 @@ $canvas -> postscript(
 print "\n\nwrote $ps_out\n\n";
 
 my($jpg_out) = "$ps_name.png";
-my($dens) = 600;
+my($jpg_out) = "$ps_name.jpg";
+my($dens) = 1000;
 
 print "convert $ps_out\nto      $jpg_out\n";
 
-print "convert -density $dens $ps_out -quality 100 $jpg_out\n";
-`convert -density $dens $ps_out -quality 100 $jpg_out`;
+print "convert -density $dens $ps_out -quality 1000 $jpg_out\n";
+`convert -density $dens $ps_out -quality 1000 $jpg_out`;
 
 print "rotate jpg\n";
-my($jpg_out2) = "$ps_name-1.jpg";
+my($jpg_out2) = "$ps_name-1.png";
 my($rot) = 90;
 
 `convert $jpg_out -rotate $rot $jpg_out2`;
@@ -1686,6 +1756,14 @@ $canvas -> createText(
 	-fill, $color,
         );
 }
+
+
+
+
+
+
+
+
 
 
 # make Box ++++++++++++++++++++++++++++++++++++++++++++
@@ -2109,7 +2187,7 @@ close(FETCH_DB);
 close(FETCH_SEQ);
 
 if ($found ==1 ) {
-        #print "$out length = $len\n";
+	#print "$out length = $len\n";
         } else {
         print "$query not found in $db!!!\n";
         `rm $out`;
@@ -2119,11 +2197,166 @@ if ($found ==1 ) {
 
 
 
+# amino acid chemistry similarity
+sub aa_chem {
+
+my (%chem) = ();
+
+%chem = (
+'R' => 'pos',
+'H' => 'pos',
+'K' => 'pos',
+'D' => 'neg',
+'E' => 'neg',
+'A' => 'phob',
+'I' => 'phob',
+'L' => 'phob',
+'M' => 'phob',
+'F' => 'phob',
+'W' => 'phob',
+'Y' => 'phob',
+'V' => 'phob',
+'S' => 'phil',
+'T' => 'phil',
+'N' => 'phil',
+'Q' => 'phil',
+'C' => 'struc',
+'P' => 'struc',
+'G' => 'gly',
+'-' => 'gap'
+);
+return (%chem);
+
+}	
+
+# AA 3 to 1 letter code
+sub mk_3to1_aa {
+
+%amino_acids = (
+    'ALA' => 'A',
+    'ARG' => 'R',
+    'ASN' => 'N',
+    'ASP' => 'D',
+    'CYS' => 'C',
+    'GLU' => 'E',
+    'GLN' => 'Q',
+    'GLY' => 'G',
+    'HIS' => 'H',
+    'ILE' => 'I',
+    'LEU' => 'L',
+    'LYS' => 'K',
+    'MET' => 'M',
+    'PHE' => 'F',
+    'PRO' => 'P',
+    'SER' => 'S',
+    'THR' => 'T',
+    'TRP' => 'W',
+    'TYR' => 'Y',
+    'VAL' => 'V',
+);
+}
 
 
 
 
+# extract fasta from pdb file
+sub pdb_to_fasta {
 
+my($pdb) = @_;
+
+my(%amino_acids) = (
+    'ALA' => 'A',
+    'ARG' => 'R',
+    'ASN' => 'N',
+    'ASP' => 'D',
+    'CYS' => 'C',
+    'GLU' => 'E',
+    'GLN' => 'Q',
+    'GLY' => 'G',
+    'HIS' => 'H',
+    'ILE' => 'I',
+    'LEU' => 'L',
+    'LYS' => 'K',
+    'MET' => 'M',
+    'PHE' => 'F',
+    'PRO' => 'P',
+    'SER' => 'S',
+    'THR' => 'T',
+    'TRP' => 'W',
+    'TYR' => 'Y',
+    'VAL' => 'V',
+);
+
+my($prot) = '';
+my($aa_old) = "DUMMY";
+my($aa_num);
+my($p1);
+my(@sata);
+my($aa2);
+my($aa3);
+my($fasta);
+my($len_p);
+my($flag) = 1; # to identify fisrt resi number (for cropped pdb files)
+my($pdb_start);
+my($start);
+
+#print "extract $pdb\n";
+
+open (PDB_FILE, "$pdb");
+while (<PDB_FILE>){
+
+        # get amino acid
+        ($p1) = /^(ATOM\s.+)/;
+        if ($p1) {
+
+                $p1 =~ s/\s+/ /g;
+                @data = split(' ',$p1);
+
+                # get current aa and 1 letter code
+                $aa3 = $data[3];
+                # get 1 letter code for aa
+                $aa2 = $amino_acids{$aa3};
+
+                # get aa number
+                $aa_num = $data[5];
+
+                # identify cases where sequence is longer than 1000
+                # ..(col 4 + 5 get merged (very stupid)
+                if ($data[4] =~ /^[A-Z]\d+/) {
+                        $data[4] =~ s/^[A-Z]//;
+                        $aa_num = $data[4];
+                        }
+
+
+		# collect amino acid for sequence
+		if ($aa_num ne $aa_old) {
+			#print "$aa_num\t$aa3\t$aa2\n";
+			$prot .= $aa2;
+			}
+		$aa_old = $aa_num;	
+	
+		# get fisrt resi number (for cropped pdb files)
+		if ($flag ==1) {
+			$pdb_start = $data[5];
+			$flag = 0;
+
+			}
+
+		}
+	}
+
+
+close(PDB_FILE);
+
+$len_p = length($prot);
+
+($fasta) = &mk_fasta($prot);
+
+
+
+return($fasta,$prot,$len_p,$pdb_start);
+
+}
 
 
 1

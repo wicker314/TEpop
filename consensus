@@ -14,11 +14,17 @@ $file = $ARGV[0];
 print "produce consensus of $file\n";
 
 $file =~ s/\.aln//;
-$file =~ s/_flat//;
+#$file =~ s/_flat//;
 
-$out = "$file\_cons";
+($cons_name) = ($ARGV[0] =~ /list_(\S+)_flat/);
+$out = "$cons_name\_consensus-3";
+$out = "$file\_consensus-1";
+
+if ($out eq '') {
+	$out = "$file\_cons";
+	}
+
 open(OUT,">$out");
-
 
 
 # extract all sequence names into @name
@@ -51,10 +57,14 @@ close(IN);
 # suck all sequences into array +++++++++++++++++++++++++++++++++++++++++++++++++
 @seq = ();
 
+# loop over sequence names 
 foreach $name (@name) {
 
+	# loop through msf file, search for sequences next to $name
 	open(IN,"<$ARGV[0]");
 	$temp_seq = '';
+
+	# concatenate all sequences of $name in temp_seq 
 	while (<IN>){
 		($seq) = /^$name\s+(\S+)/;
 		if ($seq) {
@@ -62,6 +72,7 @@ foreach $name (@name) {
 			}
 		}
 
+	# collect concatenated sequence in @seq
 	push(@seq,$temp_seq);
 	close(IN);
 	}
@@ -70,6 +81,7 @@ foreach $name (@name) {
 
 
 # extract sequence data into 2D array ++++++++++++++++++++++++++++++++++++++++++++++++++
+# loop over sequence names
 for($i=0;$i<@name;$i++){
 
 	print "$name[$i]\n";
